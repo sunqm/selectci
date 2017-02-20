@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 #
 # Author: Qiming Sun <osirpt.sun@gmail.com>
+#         Alexander Sokolov <alexander.y.sokolov@gmail.com>
 #
 
 '''
@@ -8,12 +9,6 @@ Selected CI
 
 Simple usage::
 
-    >>> from pyscf import gto, scf, ao2mo, fci
-    >>> mol = gto.M(atom='C 0 0 0; C 0 0 1')
-    >>> mf = scf.RHF(mol).run()
-    >>> h1 = mf.mo_coeff.T.dot(mf.get_hcore()).dot(mf.mo_coeff)
-    >>> h2 = ao2mo.kernel(mol, mf.mo_coeff)
-    >>> e = fci.select_ci.kernel(h1, h2, mf.mo_coeff.shape[1], mol.nelectron)[0]
 '''
 
 import numpy
@@ -334,7 +329,7 @@ def enlarge_space(myci, civec, h1, eri, norb, nelec):
     cidx = abs(civec) > myci.ci_coeff_cutoff
     strs = civec._strs[cidx]
     ts = civec._ts[cidx]
-    ci_coeff = _as_SCIvector(civec[cidx], strs, ts)
+    ci_coeff = as_SCIvector(civec[cidx], strs, ts)
     str_add, t_add = select_strs(myci, ci_coeff, h1, eri, norb, nelec)
 
     def order(x, y):
@@ -402,7 +397,7 @@ def enlarge_space(myci, civec, h1, eri, norb, nelec):
     new_strs = numpy.vstack(new_strs)
     new_ci = numpy.hstack(new_ci)
     new_ts = numpy.hstack(new_ts).view(numpy.int32).reshape(-1,2)
-    return _as_SCIvector(new_ci, new_strs, new_ts)
+    return as_SCIvector(new_ci, new_strs, new_ts)
 
 def str2orblst(string, norb):
     occ = []
@@ -451,11 +446,11 @@ def kernel_float_space(myci, h1e, eri, norb, nelec, ci0=None,
 # TODO: initial guess from CISD
     hf_str = numpy.hstack([orblst2str(range(nelec[0]), norb),
                            orblst2str(range(nelec[1]), norb)]).reshape(1,-1)
-    ci0 = _as_SCIvector(numpy.ones(1), hf_str, numpy.array([[0,0]]))
+    ci0 = as_SCIvector(numpy.ones(1), hf_str, numpy.array([[0,0]]))
     ci0 = myci.enlarge_space(ci0, h1e, eri, norb, nelec)
 
     def hop(c):
-        hc = myci.contract_2e(h1e, eri, _as_SCIvector(c, ci_strs, ci_ts), norb, nelec, hdiag)
+        hc = myci.contract_2e(h1e, eri, as_SCIvector(c, ci_strs, ci_ts), norb, nelec, hdiag)
         return hc.ravel()
     precond = lambda x, e, *args: x/(hdiag-e+myci.level_shift)
 
@@ -473,7 +468,7 @@ def kernel_float_space(myci, h1e, eri, norb, nelec, ci0=None,
         e, ci0 = myci.eig(hop, ci0, precond, tol=float_tol, lindep=lindep,
                           max_cycle=max_cycle, max_space=max_space, nroots=nroots,
                           max_memory=max_memory, verbose=log, **kwargs)
-        ci0 = _as_SCIvector(ci0, ci_strs, ci_ts)
+        ci0 = as_SCIvector(ci0, ci_strs, ci_ts)
         de, e_last = e-e_last, e
         log.info('cycle %d  E = %.15g  dE = %.8g', icycle, e+ecore, de)
 
@@ -495,7 +490,7 @@ def kernel_float_space(myci, h1e, eri, norb, nelec, ci0=None,
                     max_memory=max_memory, verbose=log, **kwargs)
 
     log.info('Selected CI  E = %.15g', e+ecore)
-    return e+ecore, _as_SCIvector(c, ci_strs, ci_ts)
+    return e+ecore, as_SCIvector(c, ci_strs, ci_ts)
 
 
 def to_fci(civec, norb, nelec):
@@ -535,7 +530,7 @@ def from_fci(fcivec, ci_strs, norb, nelec):
         civec[idet] = fcivec[ka,kb]
         ts[idet,0] = ta[ka]
         ts[idet,1] = tb[kb]
-    return _as_SCIvector(civec, ci_strs, ts)
+    return as_SCIvector(civec, ci_strs, ts)
 
 
 class SelectedCI(direct_spin1.FCISolver):
@@ -563,7 +558,7 @@ class SelectedCI(direct_spin1.FCISolver):
             self._ts = civec._ts
         else:
             assert(civec.size == len(self._strs))
-            civec = _as_SCIvector(civec, self._strs, self._ts)
+            civec = as_SCIvector(civec, self._strs, self._ts)
         return contract_2e(h1, eri, civec, norb, nelec, hdiag, **kwargs)
 
     def make_hdiag(self, h1e, eri, strs, norb, nelec):
@@ -578,15 +573,15 @@ class _SCIvector(numpy.ndarray):
         self._ts = getattr(obj, '_ts', None)
         self._strs = getattr(obj, '_strs', None)
 
-def _as_SCIvector(civec, ci_strs, ci_ts):
+def as_SCIvector(civec, ci_strs, ci_ts):
     civec = civec.view(_SCIvector)
     civec._strs = ci_strs
     civec._ts = ci_ts
     return civec
 
-def _as_SCIvector_if_not(civec, ci_strs, ci_ts):
+def as_SCIvector_if_not(civec, ci_strs, ci_ts):
     if not hasattr(civec, '_strs'):
-        civec = _as_SCIvector(civec, ci_strs, ci_ts)
+        civec = as_SCIvector(civec, ci_strs, ci_ts)
     return civec
 
 
@@ -611,7 +606,7 @@ if __name__ == '__main__':
     eri = eri + eri.transpose(1,0,2,3)
     eri = eri + eri.transpose(2,3,0,1)
     ts = numpy.zeros((1,2), dtype=numpy.int32)
-    ci1 = _as_SCIvector(numpy.ones(1), hf_str, ts)
+    ci1 = as_SCIvector(numpy.ones(1), hf_str, ts)
 
     myci = SelectedCI()
     myci.select_cutoff = .001
