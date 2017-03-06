@@ -18,7 +18,8 @@ from pyscf import ao2mo
 from pyscf.fci import cistring
 from pyscf.fci import direct_spin1
 
-def contract_2e(h1, eri, civec, norb, nelec, hdiag=None, **kwargs):
+def contract_2e(h1_h2, civec, norb, nelec, hdiag=None, **kwargs):
+    h1, eri = h1_h2
     strs = civec._strs
     ts = civec._ts
     ndet = len(strs)
@@ -450,7 +451,7 @@ def kernel_float_space(myci, h1e, eri, norb, nelec, ci0=None,
     ci0 = myci.enlarge_space(ci0, h1e, eri, norb, nelec)
 
     def hop(c):
-        hc = myci.contract_2e(h1e, eri, as_SCIvector(c, ci_strs, ci_ts), norb, nelec, hdiag)
+        hc = myci.contract_2e((h1e, eri), as_SCIvector(c, ci_strs, ci_ts), norb, nelec, hdiag)
         return hc.ravel()
     precond = lambda x, e, *args: x/(hdiag-e+myci.level_shift)
 
@@ -552,14 +553,18 @@ class SelectedCI(direct_spin1.FCISolver):
         logger.info(self, 'ci_coeff_cutoff %g', self.ci_coeff_cutoff)
         logger.info(self, 'select_cutoff   %g', self.select_cutoff)
 
-    def contract_2e(self, h1, eri, civec, norb, nelec, hdiag=None, **kwargs):
+    # define absorb_h1e for compatibility to other FCI solver
+    def absorb_h1e(h1, eri, *args, **kwargs):
+        return (h1, eri)
+
+    def contract_2e(self, h1_h2, civec, norb, nelec, hdiag=None, **kwargs):
         if hasattr(civec, '_strs'):
             self._strs = civec._strs
             self._ts = civec._ts
         else:
             assert(civec.size == len(self._strs))
             civec = as_SCIvector(civec, self._strs, self._ts)
-        return contract_2e(h1, eri, civec, norb, nelec, hdiag, **kwargs)
+        return contract_2e(h1_h2, civec, norb, nelec, hdiag, **kwargs)
 
     def make_hdiag(self, h1e, eri, strs, norb, nelec):
         return make_hdiag(h1e, eri, strs, norb, nelec)
@@ -626,7 +631,7 @@ if __name__ == '__main__':
 
     efci = direct_spin1.kernel(h1, eri, norb, nelec, verbose=5)[0]
 
-    ci3 = contract_2e(h1, eri, ci2, norb, nelec)
+    ci3 = contract_2e((h1, eri), ci2, norb, nelec)
 
     fci2 = to_fci(ci2, norb, nelec)
     h2e = direct_spin1.absorb_h1e(h1, eri, norb, nelec, .5)
